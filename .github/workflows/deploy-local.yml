@@ -1,0 +1,36 @@
+# 사설 IP(192.168.160.147)는 GitHub-hosted runner에서 접근할 수 없습니다.
+# 동일 LAN에서 192.168.160.147:22(ubuntu)에 SSH 가능한 self-hosted runner에서 실행하세요.
+# GitHub 저장소 Secrets에 LOCAL_DEPLOY_SSH_KEY(배포용 개인키 PEM 전문)를 등록해야 합니다.
+name: deploy-local
+on:
+  workflow_dispatch:
+
+env:
+  DEPLOY_HOST: 192.168.160.147
+  DEPLOY_USER: ubuntu
+  DEPLOY_PORT: "22"
+  REMOTE_DIR: /home/ubuntu/apps/kafka-active
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: active/active
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: bootJar
+        run: chmod +x gradlew && ./gradlew bootJar --no-daemon
+      - name: scp to local server
+        run: |
+          JAR="$(ls -1 build/libs/active-*-SNAPSHOT.jar | head -1)"
+          test -f "$JAR"
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.LOCAL_DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT}" -o StrictHostKeyChecking=accept-new "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '${REMOTE_DIR}'"
+          scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT}" -o StrictHostKeyChecking=accept-new "$JAR" "${DEPLOY_USER}@${DEPLOY_HOST}:${REMOTE_DIR}/active.jar"

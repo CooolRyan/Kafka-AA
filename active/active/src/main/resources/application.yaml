@@ -1,0 +1,55 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: active
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+# 두 개의 독립 KRaft 단일 브로커(A=001, B=002).
+#
+# [로컬 PC에서 공인 IP만으로 붙일 때]
+# 브로커 advertised 가 사설(192.168.100.x:9092)이면, 부트스트랩만 공인으로 잡아도 메타데이터 이후에 사설로 붙으려다 실패합니다.
+# NAT만으로는 메타데이터가 바뀌지 않으므로 보통은 (1) VPN으로 사설망 포함 (2) 브로커에 EXTERNAL 리스너 추가해
+# advertised 에 공인:9094 를 같이 광고 — Spring 은 bootstrap 을 공인:9094 로 (infra/kafka/server-kraft-node*-dual-listener.properties 참고, ACG 9094 허용)
+app:
+  kafka:
+    clusters:
+      A:
+        bootstrap-servers: 192.168.100.6:9092
+      B:
+        bootstrap-servers: 192.168.100.7:9092
+      # 외부용 이중 리스너 적용 시 예시 (ACG 인바운드 9094 필요):
+      # A: { bootstrap-servers: 211.188.50.31:9094 }
+      # B: { bootstrap-servers: 223.130.154.172:9094 }
+    producer-topic: aa-demo-events
+    consumer:
+      primary: A
+      topic: aa-demo-events
+      group-id: aa-demo-app
+    failover-watchdog-enabled: true
+    failover-check-interval-ms: 15000
+
+  # 미러 “딜레이” 근사: 소스 vs 미러 토픽의 latest offset 차이 합 → Micrometer + ClickHouse
+  mirror-metrics:
+    enabled: true
+    interval-ms: 15000
+    source-cluster: A
+    mirror-cluster: B
+    source-topic: aa-demo-events
+    mirror-topic: A.aa-demo-events
+
+  clickhouse:
+    enabled: true
+    http-url: http://192.168.160.147:8123
+    database: default
+    user: default
+    password: ""

@@ -1,0 +1,22 @@
+[Unit]
+Description=Apache Kafka (KRaft)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kafka
+Group=kafka
+# Rocky 9 headless JRE (버전 디렉터리 대신 alternatives 심볼릭 링크 사용)
+Environment="JAVA_HOME=/usr/lib/jvm/jre-17"
+Environment="KAFKA_HEAP_OPTS=-Xmx1G -Xms1G"
+ExecStart=/opt/kafka/bin/kafka-server-start.sh /etc/kafka/server.properties
+ExecStop=/opt/kafka/bin/kafka-server-stop.sh
+SuccessExitStatus=0 143
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=100000
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+{
+  "name": "mirror-b-to-a",
+  "config": {
+    "connector.class": "org.apache.kafka.connect.mirror.MirrorSourceConnector",
+    "tasks.max": "1",
+    "source.cluster.alias": "B",
+    "target.cluster.alias": "A",
+    "A.bootstrap.servers": "192.168.100.6:9092",
+    "B.bootstrap.servers": "192.168.100.7:9092",
+    "topics": "aa-demo-events",
+    "replication.factor": "1",
+    "sync.topic.acls.enabled": "false"
+  }
+}

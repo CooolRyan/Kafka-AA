@@ -1,0 +1,8 @@
+*.pem
+local-ssh.pem
+kafka-active001.pem
+kafka-active002.pem
+ncp-kafka.pem
+kafka2-ssh
+kafka2-ssh.pem
+infra/deploy/local-server.env
