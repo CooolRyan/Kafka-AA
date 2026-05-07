@@ -18,6 +18,12 @@ public class AppMirrorMetricsProperties {
 	 */
 	private String mirrorTopic = "";
 
+	/** ClickHouse·대시보드용 tail 샘플 건수 (소스/미러 각각) */
+	private int tailSampleLimit = 24;
+
+	/** true 이면 mirror-metrics 스케줄마다 mirror_message_tail 에 적재 */
+	private boolean tailToClickhouse = true;
+
 	public boolean isEnabled() {
 		return enabled;
 	}
@@ -71,5 +77,21 @@ public class AppMirrorMetricsProperties {
 			return sourceTopic;
 		}
 		return mirrorTopic;
+	}
+
+	public int getTailSampleLimit() {
+		return tailSampleLimit;
+	}
+
+	public void setTailSampleLimit(int tailSampleLimit) {
+		this.tailSampleLimit = tailSampleLimit;
+	}
+
+	public boolean isTailToClickhouse() {
+		return tailToClickhouse;
+	}
+
+	public void setTailToClickhouse(boolean tailToClickhouse) {
+		this.tailToClickhouse = tailToClickhouse;
 	}
 }

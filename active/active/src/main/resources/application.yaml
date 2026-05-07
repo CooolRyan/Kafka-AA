@@ -16,20 +16,19 @@ management:
 
 # 두 개의 독립 KRaft 단일 브로커(A=001, B=002).
 #
-# [로컬 PC에서 공인 IP만으로 붙일 때]
-# 브로커 advertised 가 사설(192.168.100.x:9092)이면, 부트스트랩만 공인으로 잡아도 메타데이터 이후에 사설로 붙으려다 실패합니다.
-# NAT만으로는 메타데이터가 바뀌지 않으므로 보통은 (1) VPN으로 사설망 포함 (2) 브로커에 EXTERNAL 리스너 추가해
-# advertised 에 공인:9094 를 같이 광고 — Spring 은 bootstrap 을 공인:9094 로 (infra/kafka/server-kraft-node*-dual-listener.properties 참고, ACG 9094 허용)
+# 기본값은 EXTERNAL 리스너(공인:9094). 로컬 PC·로컬 서버가 VPC 사설(192.168.100.x)에 없을 때 사용.
+# 브로커는 이중 리스너로 advertised 에 공인:9094 를 광고해야 함 (infra/kafka/server-kraft-node*-dual-listener.properties, ACG 9094).
+# 같은 VPC 안에서만 돌릴 때는 아래 사설:9092 로 바꿔도 됨.
 app:
   kafka:
     clusters:
       A:
-        bootstrap-servers: 192.168.100.6:9092
+        bootstrap-servers: 211.188.50.31:9094
       B:
-        bootstrap-servers: 192.168.100.7:9092
-      # 외부용 이중 리스너 적용 시 예시 (ACG 인바운드 9094 필요):
-      # A: { bootstrap-servers: 211.188.50.31:9094 }
-      # B: { bootstrap-servers: 223.130.154.172:9094 }
+        bootstrap-servers: 223.130.154.172:9094
+      # VPC 내부 전용 예시:
+      # A: { bootstrap-servers: 192.168.100.6:9092 }
+      # B: { bootstrap-servers: 192.168.100.7:9092 }
     producer-topic: aa-demo-events
     consumer:
       primary: A
@@ -46,6 +45,9 @@ app:
     mirror-cluster: B
     source-topic: aa-demo-events
     mirror-topic: A.aa-demo-events
+    # ClickHouse mirror_message_tail 적재 시 소스/미러 각각 최대 N건
+    tail-sample-limit: 24
+    tail-to-clickhouse: true
 
   clickhouse:
     enabled: true

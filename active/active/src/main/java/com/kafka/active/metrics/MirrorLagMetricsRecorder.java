@@ -1,5 +1,7 @@
 package com.kafka.active.metrics;
 
+import com.kafka.active.config.AppClickHouseProperties;
+import com.kafka.active.config.AppKafkaProperties;
 import com.kafka.active.config.AppMirrorMetricsProperties;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -19,6 +21,9 @@ public class MirrorLagMetricsRecorder {
 
 	private final MirrorReplicationLagService lagService;
 	private final ClickHouseMirrorLagSink clickHouseMirrorLagSink;
+	private final ClickHouseMirrorTailSink clickHouseMirrorTailSink;
+	private final AppKafkaProperties kafkaProperties;
+	private final AppClickHouseProperties clickHouseProperties;
 	private final AppMirrorMetricsProperties mirrorMetricsProperties;
 	private final MeterRegistry meterRegistry;
 	private final AtomicLong lagMessages = new AtomicLong(-1);
@@ -28,10 +33,16 @@ public class MirrorLagMetricsRecorder {
 	public MirrorLagMetricsRecorder(
 			MirrorReplicationLagService lagService,
 			ClickHouseMirrorLagSink clickHouseMirrorLagSink,
+			ClickHouseMirrorTailSink clickHouseMirrorTailSink,
+			AppKafkaProperties kafkaProperties,
+			AppClickHouseProperties clickHouseProperties,
 			AppMirrorMetricsProperties mirrorMetricsProperties,
 			MeterRegistry meterRegistry) {
 		this.lagService = lagService;
 		this.clickHouseMirrorLagSink = clickHouseMirrorLagSink;
+		this.clickHouseMirrorTailSink = clickHouseMirrorTailSink;
+		this.kafkaProperties = kafkaProperties;
+		this.clickHouseProperties = clickHouseProperties;
 		this.mirrorMetricsProperties = mirrorMetricsProperties;
 		this.meterRegistry = meterRegistry;
 	}
@@ -60,6 +71,16 @@ public class MirrorLagMetricsRecorder {
 			sourceHwm.set(snap.sourceHighWatermark());
 			mirrorHwm.set(snap.mirrorHighWatermark());
 			clickHouseMirrorLagSink.write(snap);
+			if (mirrorMetricsProperties.isTailToClickhouse() && clickHouseProperties.isEnabled()) {
+				int lim = mirrorMetricsProperties.getTailSampleLimit();
+				String srcKey = mirrorMetricsProperties.getSourceCluster().trim().toUpperCase();
+				String mirKey = mirrorMetricsProperties.getMirrorCluster().trim().toUpperCase();
+				String srcBoot = kafkaProperties.bootstrapFor(srcKey);
+				String mirBoot = kafkaProperties.bootstrapFor(mirKey);
+				var src = TopicRecentTailReader.readTail(srcBoot, snap.sourceTopic(), lim);
+				var mir = TopicRecentTailReader.readTail(mirBoot, snap.mirrorTopic(), lim);
+				clickHouseMirrorTailSink.write(snap, src, mir);
+			}
 		} catch (Exception e) {
 			log.warn("mirror lag scrape failed: {}", e.toString());
 		}

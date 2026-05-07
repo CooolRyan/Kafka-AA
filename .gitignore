@@ -6,3 +6,5 @@ ncp-kafka.pem
 kafka2-ssh
 kafka2-ssh.pem
 infra/deploy/local-server.env
+jmeter/*.jtl
+jmeter/report/
