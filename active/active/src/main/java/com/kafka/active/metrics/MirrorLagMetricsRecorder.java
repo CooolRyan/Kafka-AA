@@ -22,6 +22,8 @@ public class MirrorLagMetricsRecorder {
 	private final MirrorReplicationLagService lagService;
 	private final ClickHouseMirrorLagSink clickHouseMirrorLagSink;
 	private final ClickHouseMirrorTailSink clickHouseMirrorTailSink;
+	private final ClickHouseMirrorCompareSink clickHouseMirrorCompareSink;
+	private final MirrorMessageCompareService mirrorMessageCompareService;
 	private final AppKafkaProperties kafkaProperties;
 	private final AppClickHouseProperties clickHouseProperties;
 	private final AppMirrorMetricsProperties mirrorMetricsProperties;
@@ -34,6 +36,8 @@ public class MirrorLagMetricsRecorder {
 			MirrorReplicationLagService lagService,
 			ClickHouseMirrorLagSink clickHouseMirrorLagSink,
 			ClickHouseMirrorTailSink clickHouseMirrorTailSink,
+			ClickHouseMirrorCompareSink clickHouseMirrorCompareSink,
+			MirrorMessageCompareService mirrorMessageCompareService,
 			AppKafkaProperties kafkaProperties,
 			AppClickHouseProperties clickHouseProperties,
 			AppMirrorMetricsProperties mirrorMetricsProperties,
@@ -41,6 +45,8 @@ public class MirrorLagMetricsRecorder {
 		this.lagService = lagService;
 		this.clickHouseMirrorLagSink = clickHouseMirrorLagSink;
 		this.clickHouseMirrorTailSink = clickHouseMirrorTailSink;
+		this.clickHouseMirrorCompareSink = clickHouseMirrorCompareSink;
+		this.mirrorMessageCompareService = mirrorMessageCompareService;
 		this.kafkaProperties = kafkaProperties;
 		this.clickHouseProperties = clickHouseProperties;
 		this.mirrorMetricsProperties = mirrorMetricsProperties;
@@ -80,6 +86,8 @@ public class MirrorLagMetricsRecorder {
 				var src = TopicRecentTailReader.readTail(srcBoot, snap.sourceTopic(), lim);
 				var mir = TopicRecentTailReader.readTail(mirBoot, snap.mirrorTopic(), lim);
 				clickHouseMirrorTailSink.write(snap, src, mir);
+				clickHouseMirrorCompareSink.write(
+						mirrorMessageCompareService.observeAndCompare(snap, src, mir));
 			}
 		} catch (Exception e) {
 			log.warn("mirror lag scrape failed: {}", e.toString());

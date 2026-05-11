@@ -1,0 +1,90 @@
+services:
+  mongo:
+    image: mongo:5.0.32-focal
+    container_name: hyperdx-mongo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - hyperdx_mongo:/data/db
+
+  # HyperDX UI/API only. It reuses the ClickHouse already installed on the host.
+  # Run with host network so it can reach host-local ClickHouse at 127.0.0.1:8123.
+  hyperdx:
+    image: docker.hyperdx.io/hyperdx/hyperdx:2
+    container_name: hyperdx
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - mongo
+    environment:
+      HYPERDX_API_KEY: local-dev
+      HYPERDX_API_PORT: "8000"
+      HYPERDX_APP_PORT: "3000"
+      # Access through SSH tunnel:
+      # ssh -L 3000:127.0.0.1:3000 -L 8000:127.0.0.1:8000 ubuntu@192.168.160.147
+      HYPERDX_APP_URL: "http://127.0.0.1"
+      FRONTEND_URL: "http://127.0.0.1:3000"
+      SERVER_URL: "http://127.0.0.1:8000"
+      HYPERDX_LOG_LEVEL: info
+      MONGO_URI: "mongodb://127.0.0.1:27017/hyperdx"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4318"
+      DEFAULT_CONNECTIONS: >
+        [{"name":"Kafka Mirror ClickHouse","host":"http://127.0.0.1:8123","username":"default","password":""}]
+      DEFAULT_SOURCES: >
+        [
+          {
+            "from":{"databaseName":"default","tableName":"mirror_message_tail"},
+            "kind":"log",
+            "timestampValueExpression":"ts",
+            "name":"Kafka Mirror Messages",
+            "displayedTimestampValueExpression":"ts",
+            "implicitColumnExpression":"value",
+            "serviceNameExpression":"cluster",
+            "bodyExpression":"value",
+            "eventAttributesExpression":"map('role', role, 'topic', topic, 'partition', toString(partition), 'offset', toString(offset), 'lag_at_scrape', toString(lag_at_scrape))",
+            "resourceAttributesExpression":"map('source', 'kafka-mm2')",
+            "defaultTableSelectExpression":"ts,role,cluster,topic,partition,offset,value",
+            "severityTextExpression":"role",
+            "traceIdExpression":"''",
+            "spanIdExpression":"''",
+            "connection":"Kafka Mirror ClickHouse"
+          },
+          {
+            "from":{"databaseName":"default","tableName":"mirror_message_compare"},
+            "kind":"log",
+            "timestampValueExpression":"ts",
+            "name":"Kafka Mirror Delay",
+            "displayedTimestampValueExpression":"ts",
+            "implicitColumnExpression":"concat(value, ' delay=', toString(replication_delay_sec), 's')",
+            "serviceNameExpression":"concat(source_cluster, '->', mirror_cluster)",
+            "bodyExpression":"value",
+            "eventAttributesExpression":"map('message_id', message_id, 'source_topic', source_topic, 'mirror_topic', mirror_topic, 'source_offset', toString(source_offset), 'mirror_offset', toString(mirror_offset), 'replication_delay_ms', toString(replication_delay_ms), 'replication_delay_sec', toString(replication_delay_sec), 'end_to_end_delay_ms', toString(end_to_end_delay_ms), 'kafka_timestamp_delta_ms', toString(kafka_timestamp_delta_ms))",
+            "resourceAttributesExpression":"map('source', 'spring-mirror-compare')",
+            "defaultTableSelectExpression":"ts,message_id,value,source_cluster,mirror_cluster,source_offset,mirror_offset,replication_delay_sec,end_to_end_delay_sec,kafka_timestamp_delta_ms",
+            "severityTextExpression":"if(replication_delay_ms = 0, 'same-scrape', 'delayed')",
+            "traceIdExpression":"''",
+            "spanIdExpression":"''",
+            "connection":"Kafka Mirror ClickHouse"
+          },
+          {
+            "from":{"databaseName":"default","tableName":"mirror_lag"},
+            "kind":"log",
+            "timestampValueExpression":"ts",
+            "name":"Kafka Mirror Lag",
+            "displayedTimestampValueExpression":"ts",
+            "implicitColumnExpression":"concat(source_cluster, ' -> ', mirror_cluster, ' lag=', toString(lag_messages))",
+            "serviceNameExpression":"concat(source_cluster, '->', mirror_cluster)",
+            "bodyExpression":"concat(source_topic, ' -> ', mirror_topic)",
+            "eventAttributesExpression":"map('lag_messages', toString(lag_messages), 'source_hwm', toString(source_hwm), 'mirror_hwm', toString(mirror_hwm))",
+            "resourceAttributesExpression":"map('source', 'spring-mirror-metrics')",
+            "defaultTableSelectExpression":"ts,source_cluster,mirror_cluster,source_topic,mirror_topic,lag_messages,source_hwm,mirror_hwm",
+            "severityTextExpression":"if(lag_messages = 0, 'ok', 'lag')",
+            "traceIdExpression":"''",
+            "spanIdExpression":"''",
+            "connection":"Kafka Mirror ClickHouse"
+          }
+        ]
+
+volumes:
+  hyperdx_mongo: {}

@@ -3,6 +3,7 @@ package com.kafka.active.web;
 import com.kafka.active.kafka.ClusterReachabilityProbe;
 import com.kafka.active.kafka.ConsumerFailoverCoordinator;
 import com.kafka.active.kafka.DualClusterTrafficProducer;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,8 +35,13 @@ public class DemoKafkaController {
 	public ResponseEntity<Map<String, Object>> produce(
 			@RequestParam(defaultValue = "20") int count,
 			@RequestParam(defaultValue = "demo") String prefix) {
-		producer.sendBatch(count, prefix);
-		return ResponseEntity.ok(Map.of("requested", count, "mode", "round-robin-50-50-A-B"));
+		List<String> ids = producer.sendBatch(count, prefix);
+		return ResponseEntity.ok(
+				Map.of(
+						"requested", count,
+						"mode", "round-robin-50-50-A-B",
+						"payload", "json-id-sentAtMs",
+						"sampleIds", ids.stream().limit(10).toList()));
 	}
 
 	@PostMapping("/failover/{target}")
