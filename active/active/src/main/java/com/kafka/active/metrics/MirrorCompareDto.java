@@ -7,4 +7,5 @@ public record MirrorCompareDto(
 		String sourceBootstrap,
 		String mirrorBootstrap,
 		List<TopicTailRecord> sourceMessages,
-		List<TopicTailRecord> mirrorMessages) {}
+		List<TopicTailRecord> mirrorMessages,
+		List<MirrorPairedRow> pairedRows) {}
