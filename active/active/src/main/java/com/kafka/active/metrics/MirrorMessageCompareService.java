@@ -25,12 +25,8 @@ public class MirrorMessageCompareService {
 	private final Set<String> emitted = new HashSet<>();
 
 	public MirrorMessageCompareService(ObjectMapper objectMapper) {
-		this(objectMapper, Clock.systemUTC());
-	}
-
-	MirrorMessageCompareService(ObjectMapper objectMapper, Clock clock) {
 		this.objectMapper = objectMapper;
-		this.clock = clock;
+		this.clock = Clock.systemUTC();
 	}
 
 	public synchronized List<MirrorMessageCompareRow> observeAndCompare(
