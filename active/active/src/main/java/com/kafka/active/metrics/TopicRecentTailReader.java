@@ -14,8 +14,12 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class TopicRecentTailReader {
+
+	private static final Logger log = LoggerFactory.getLogger(TopicRecentTailReader.class);
 
 	private TopicRecentTailReader() {}
 
@@ -33,10 +37,14 @@ public final class TopicRecentTailReader {
 		cfg.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 		cfg.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
 		cfg.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		cfg.put(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, 30_000);
+		cfg.put(ConsumerConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, 30_000);
+		cfg.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, Math.max(500, limit));
 
 		try (KafkaConsumer<String, String> c = new KafkaConsumer<>(cfg)) {
 			List<PartitionInfo> infos = c.partitionsFor(topic);
 			if (infos == null || infos.isEmpty()) {
+				log.warn("tail read: no partitions topic={} bootstrap={}", topic, bootstrap);
 				return List.of();
 			}
 			List<TopicPartition> tps =
@@ -46,21 +54,27 @@ public final class TopicRecentTailReader {
 							.toList();
 			c.assign(tps);
 			Map<TopicPartition, Long> endOffsets = c.endOffsets(tps);
+			Map<TopicPartition, Long> beginningOffsets = c.beginningOffsets(tps);
 			int n = tps.size();
 			int perPart = Math.max(1, (limit + n - 1) / n);
+
 			for (TopicPartition tp : tps) {
 				long end = endOffsets.getOrDefault(tp, 0L);
-				if (end <= 0) {
-					c.seek(tp, 0);
-				} else {
-					long start = Math.max(0L, end - perPart);
-					c.seek(tp, start);
+				long begin = beginningOffsets.getOrDefault(tp, 0L);
+				if (end <= begin) {
+					continue;
 				}
+				long start = Math.max(begin, end - perPart);
+				c.seek(tp, start);
 			}
+			// seek 반영 + out-of-range 리셋이 poll 전에 일어나도록 1회 워밍업
+			c.poll(Duration.ofMillis(500));
+
 			List<TopicTailRecord> buf = new ArrayList<>();
 			int emptyPolls = 0;
-			while (emptyPolls < 20) {
-				ConsumerRecords<String, String> records = c.poll(Duration.ofMillis(400));
+			final int maxEmptyPolls = 40;
+			while (emptyPolls < maxEmptyPolls && buf.size() < limit * 3) {
+				ConsumerRecords<String, String> records = c.poll(Duration.ofMillis(500));
 				if (records.isEmpty()) {
 					emptyPolls++;
 				} else {
@@ -74,7 +88,8 @@ public final class TopicRecentTailReader {
 				boolean allCaughtUp = true;
 				for (TopicPartition tp : tps) {
 					long end = endOffsets.getOrDefault(tp, 0L);
-					if (end <= 0) {
+					long begin = beginningOffsets.getOrDefault(tp, 0L);
+					if (end <= begin) {
 						continue;
 					}
 					if (c.position(tp) < end) {
@@ -82,7 +97,10 @@ public final class TopicRecentTailReader {
 						break;
 					}
 				}
-				if (allCaughtUp) {
+				if (allCaughtUp && !buf.isEmpty()) {
+					break;
+				}
+				if (allCaughtUp && emptyPolls >= 3) {
 					break;
 				}
 			}
@@ -90,7 +108,19 @@ public final class TopicRecentTailReader {
 			if (buf.size() > limit) {
 				return new ArrayList<>(buf.subList(0, limit));
 			}
+			if (buf.isEmpty()) {
+				log.warn(
+						"tail read empty topic={} bootstrap={} partitions={} endOffsets={} beginningOffsets={}",
+						topic,
+						bootstrap,
+						tps.size(),
+						endOffsets,
+						beginningOffsets);
+			}
 			return buf;
+		} catch (Exception e) {
+			log.warn("tail read failed topic={} bootstrap={} err={}", topic, bootstrap, e.toString());
+			return List.of();
 		}
 	}
 }
