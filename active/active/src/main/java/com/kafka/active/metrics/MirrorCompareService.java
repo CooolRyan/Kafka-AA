@@ -30,6 +30,7 @@ public class MirrorCompareService {
 	private static final long CACHE_TTL_MS = 10 * 60 * 1000L;
 
 	private final MirrorReplicationLagService lagService;
+	private final ClickHouseMirrorTailSource clickHouseMirrorTailSource;
 	private final AppKafkaProperties kafkaProperties;
 	private final AppMirrorMetricsProperties mirrorMetricsProperties;
 	private final ObjectMapper objectMapper;
@@ -38,10 +39,12 @@ public class MirrorCompareService {
 
 	public MirrorCompareService(
 			MirrorReplicationLagService lagService,
+			ClickHouseMirrorTailSource clickHouseMirrorTailSource,
 			AppKafkaProperties kafkaProperties,
 			AppMirrorMetricsProperties mirrorMetricsProperties,
 			ObjectMapper objectMapper) {
 		this.lagService = lagService;
+		this.clickHouseMirrorTailSource = clickHouseMirrorTailSource;
 		this.kafkaProperties = kafkaProperties;
 		this.mirrorMetricsProperties = mirrorMetricsProperties;
 		this.objectMapper = objectMapper;
@@ -58,6 +61,20 @@ public class MirrorCompareService {
 		String mirBoot = kafkaProperties.bootstrapFor(mirKey);
 		List<TopicTailRecord> src = TopicRecentTailReader.readTail(srcBoot, srcTopic, limit);
 		List<TopicTailRecord> mir = TopicRecentTailReader.readTail(mirBoot, mirTopic, limit);
+		if (src.isEmpty()
+				&& mir.isEmpty()
+				&& mirrorMetricsProperties.isCompareFallbackClickhouse()) {
+			var fromCh =
+					clickHouseMirrorTailSource.loadRecent(
+							limit,
+							srcTopic,
+							mirTopic,
+							lag.sourceCluster(),
+							lag.mirrorCluster(),
+							mirrorMetricsProperties.getCompareClickhouseLookbackMinutes());
+			src = fromCh.source();
+			mir = fromCh.mirror();
+		}
 		List<MirrorPairedRow> paired = buildPairedRowsWithCache(src, mir, Math.max(50, limit));
 		return new MirrorCompareDto(lag, srcBoot, mirBoot, src, mir, paired);
 	}

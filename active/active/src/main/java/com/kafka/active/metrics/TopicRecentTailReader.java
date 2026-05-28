@@ -28,81 +28,43 @@ public final class TopicRecentTailReader {
 		if (limit <= 0) {
 			return List.of();
 		}
-		String groupId = "mirror-tail-" + UUID.randomUUID();
-		Map<String, Object> cfg = new HashMap<>();
-		cfg.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
-		cfg.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-		cfg.put(ConsumerConfig.CLIENT_ID_CONFIG, "mirror-tail-" + groupId.substring(0, 12));
-		cfg.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-		cfg.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-		cfg.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-		cfg.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-		cfg.put(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, 30_000);
-		cfg.put(ConsumerConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, 30_000);
-		cfg.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, Math.max(500, limit));
-
-		try (KafkaConsumer<String, String> c = new KafkaConsumer<>(cfg)) {
-			List<PartitionInfo> infos = c.partitionsFor(topic);
+		try (KafkaConsumer<String, String> meta = new KafkaConsumer<>(consumerConfig(bootstrap, "meta"))) {
+			List<PartitionInfo> infos = meta.partitionsFor(topic);
 			if (infos == null || infos.isEmpty()) {
 				log.warn("tail read: no partitions topic={} bootstrap={}", topic, bootstrap);
 				return List.of();
 			}
-			List<TopicPartition> tps =
+			List<TopicPartition> allTps =
 					infos.stream()
 							.map(pi -> new TopicPartition(topic, pi.partition()))
 							.sorted(Comparator.comparingInt(TopicPartition::partition))
 							.toList();
-			c.assign(tps);
-			Map<TopicPartition, Long> endOffsets = c.endOffsets(tps);
-			Map<TopicPartition, Long> beginningOffsets = c.beginningOffsets(tps);
-			int n = tps.size();
-			int perPart = Math.max(1, (limit + n - 1) / n);
+			meta.assign(allTps);
+			Map<TopicPartition, Long> endOffsets = meta.endOffsets(allTps);
+			Map<TopicPartition, Long> beginningOffsets = meta.beginningOffsets(allTps);
 
-			for (TopicPartition tp : tps) {
-				long end = endOffsets.getOrDefault(tp, 0L);
-				long begin = beginningOffsets.getOrDefault(tp, 0L);
-				if (end <= begin) {
-					continue;
+			List<TopicPartition> readable = new ArrayList<>();
+			for (TopicPartition tp : allTps) {
+				if (endOffsets.getOrDefault(tp, 0L) > beginningOffsets.getOrDefault(tp, 0L)) {
+					readable.add(tp);
 				}
-				long start = Math.max(begin, end - perPart);
-				c.seek(tp, start);
 			}
-			// seek 반영 + out-of-range 리셋이 poll 전에 일어나도록 1회 워밍업
-			c.poll(Duration.ofMillis(500));
+			if (readable.isEmpty()) {
+				log.warn(
+						"tail read: no readable partitions topic={} bootstrap={} end={} begin={}",
+						topic,
+						bootstrap,
+						endOffsets,
+						beginningOffsets);
+				return List.of();
+			}
 
+			int perPart = Math.max(1, (limit + readable.size() - 1) / readable.size());
 			List<TopicTailRecord> buf = new ArrayList<>();
-			int emptyPolls = 0;
-			final int maxEmptyPolls = 40;
-			while (emptyPolls < maxEmptyPolls && buf.size() < limit * 3) {
-				ConsumerRecords<String, String> records = c.poll(Duration.ofMillis(500));
-				if (records.isEmpty()) {
-					emptyPolls++;
-				} else {
-					emptyPolls = 0;
-					for (ConsumerRecord<String, String> r : records) {
-						buf.add(
-								new TopicTailRecord(
-										r.partition(), r.offset(), r.timestamp(), r.key(), r.value()));
-					}
-				}
-				boolean allCaughtUp = true;
-				for (TopicPartition tp : tps) {
-					long end = endOffsets.getOrDefault(tp, 0L);
-					long begin = beginningOffsets.getOrDefault(tp, 0L);
-					if (end <= begin) {
-						continue;
-					}
-					if (c.position(tp) < end) {
-						allCaughtUp = false;
-						break;
-					}
-				}
-				if (allCaughtUp && !buf.isEmpty()) {
-					break;
-				}
-				if (allCaughtUp && emptyPolls >= 3) {
-					break;
-				}
+			for (TopicPartition tp : readable) {
+				long end = endOffsets.get(tp);
+				long begin = beginningOffsets.get(tp);
+				buf.addAll(readPartitionTail(bootstrap, tp, begin, end, perPart));
 			}
 			buf.sort(Comparator.comparingLong(TopicTailRecord::timestampMs).reversed());
 			if (buf.size() > limit) {
@@ -110,10 +72,10 @@ public final class TopicRecentTailReader {
 			}
 			if (buf.isEmpty()) {
 				log.warn(
-						"tail read empty topic={} bootstrap={} partitions={} endOffsets={} beginningOffsets={}",
+						"tail read empty topic={} bootstrap={} readable={} end={} begin={}",
 						topic,
 						bootstrap,
-						tps.size(),
+						readable,
 						endOffsets,
 						beginningOffsets);
 			}
@@ -122,5 +84,54 @@ public final class TopicRecentTailReader {
 			log.warn("tail read failed topic={} bootstrap={} err={}", topic, bootstrap, e.toString());
 			return List.of();
 		}
+	}
+
+	private static List<TopicTailRecord> readPartitionTail(
+			String bootstrap, TopicPartition tp, long begin, long end, int maxRecords) {
+		String runId = UUID.randomUUID().toString();
+		long start = Math.max(begin, end - maxRecords);
+		List<TopicTailRecord> out = new ArrayList<>();
+		try (KafkaConsumer<String, String> c = new KafkaConsumer<>(consumerConfig(bootstrap, runId))) {
+			c.assign(List.of(tp));
+			c.seek(tp, start);
+			int empty = 0;
+			while (empty < 30 && out.size() < maxRecords * 2 && c.position(tp) < end) {
+				ConsumerRecords<String, String> records = c.poll(Duration.ofMillis(500));
+				if (records.isEmpty()) {
+					empty++;
+				} else {
+					empty = 0;
+					for (ConsumerRecord<String, String> r : records) {
+						out.add(
+								new TopicTailRecord(
+										r.partition(), r.offset(), r.timestamp(), r.key(), r.value()));
+					}
+				}
+			}
+		} catch (Exception e) {
+			log.warn(
+					"tail read partition failed tp={} bootstrap={} begin={} end={} err={}",
+					tp,
+					bootstrap,
+					begin,
+					end,
+					e.toString());
+		}
+		return out;
+	}
+
+	private static Map<String, Object> consumerConfig(String bootstrap, String runId) {
+		Map<String, Object> cfg = new HashMap<>();
+		cfg.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
+		cfg.put(ConsumerConfig.GROUP_ID_CONFIG, "mirror-tail-" + runId);
+		cfg.put(ConsumerConfig.CLIENT_ID_CONFIG, "mirror-tail-" + runId);
+		cfg.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+		cfg.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+		cfg.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+		cfg.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		cfg.put(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, 30_000);
+		cfg.put(ConsumerConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, 30_000);
+		cfg.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 500);
+		return cfg;
 	}
 }

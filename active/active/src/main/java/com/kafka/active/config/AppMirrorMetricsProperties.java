@@ -24,6 +24,12 @@ public class AppMirrorMetricsProperties {
 	/** true 이면 mirror-metrics 스케줄마다 mirror_message_tail 에 적재 */
 	private boolean tailToClickhouse = true;
 
+	/** Kafka tail 이 비었을 때 compare UI 를 ClickHouse 스냅샷으로 채움 */
+	private boolean compareFallbackClickhouse = true;
+
+	/** compare ClickHouse fallback 조회 구간(분) */
+	private int compareClickhouseLookbackMinutes = 30;
+
 	public boolean isEnabled() {
 		return enabled;
 	}
@@ -93,5 +99,21 @@ public class AppMirrorMetricsProperties {
 
 	public void setTailToClickhouse(boolean tailToClickhouse) {
 		this.tailToClickhouse = tailToClickhouse;
+	}
+
+	public boolean isCompareFallbackClickhouse() {
+		return compareFallbackClickhouse;
+	}
+
+	public void setCompareFallbackClickhouse(boolean compareFallbackClickhouse) {
+		this.compareFallbackClickhouse = compareFallbackClickhouse;
+	}
+
+	public int getCompareClickhouseLookbackMinutes() {
+		return compareClickhouseLookbackMinutes;
+	}
+
+	public void setCompareClickhouseLookbackMinutes(int compareClickhouseLookbackMinutes) {
+		this.compareClickhouseLookbackMinutes = compareClickhouseLookbackMinutes;
 	}
 }
