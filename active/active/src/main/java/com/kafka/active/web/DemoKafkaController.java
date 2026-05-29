@@ -1,11 +1,13 @@
 package com.kafka.active.web;
 
+import com.kafka.active.config.AppKafkaProperties;
 import com.kafka.active.kafka.ClusterReachabilityProbe;
 import com.kafka.active.kafka.ConsumerFailoverCoordinator;
 import com.kafka.active.kafka.DualClusterTrafficProducer;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -21,14 +23,17 @@ public class DemoKafkaController {
 	private final DualClusterTrafficProducer producer;
 	private final ConsumerFailoverCoordinator failoverCoordinator;
 	private final ClusterReachabilityProbe probe;
+	private final AppKafkaProperties kafkaProperties;
 
 	public DemoKafkaController(
 			DualClusterTrafficProducer producer,
 			ConsumerFailoverCoordinator failoverCoordinator,
-			ClusterReachabilityProbe probe) {
+			ClusterReachabilityProbe probe,
+			AppKafkaProperties kafkaProperties) {
 		this.producer = producer;
 		this.failoverCoordinator = failoverCoordinator;
 		this.probe = probe;
+		this.kafkaProperties = kafkaProperties;
 	}
 
 	@PostMapping("/produce")
@@ -42,6 +47,23 @@ public class DemoKafkaController {
 						"mode", "round-robin-50-50-A-B",
 						"payload", "json-id-sentAtMs",
 						"sampleIds", ids.stream().limit(10).toList()));
+	}
+
+	@GetMapping("/failover/status")
+	public ResponseEntity<Map<String, Object>> failoverStatus() {
+		String primary = kafkaProperties.getConsumer().getPrimary().trim().toUpperCase();
+		String standby = probe.standbyKey();
+		return ResponseEntity.ok(
+				Map.of(
+						"consumingOnStandby", failoverCoordinator.isConsumingOnStandby(),
+						"activeConsumer", failoverCoordinator.isConsumingOnStandby() ? standby : primary,
+						"consumerTopic", kafkaProperties.getConsumer().getTopic(),
+						"consumerGroupId", kafkaProperties.getConsumer().getGroupId(),
+						"primaryCluster", primary,
+						"standbyCluster", standby,
+						"primaryReachable", probe.primaryReachable(),
+						"clusterAReachable", probe.canReachCluster("A"),
+						"clusterBReachable", probe.canReachCluster("B")));
 	}
 
 	@PostMapping("/failover/{target}")
