@@ -25,11 +25,22 @@ Open:
 http://192.168.160.147:3000
 ```
 
-Default sources:
+Default sources (see `docker-compose.yml` `DEFAULT_SOURCES`):
 
 - `Kafka Mirror Messages` -> `default.mirror_message_tail`
 - `Kafka Mirror Delay` -> `default.mirror_message_compare`
 - `Kafka Mirror Lag` -> `default.mirror_lag`
+
+HyperDX stores sources in MongoDB. **`DEFAULT_SOURCES` applies only on first boot.** If the UI shows only Lag + Messages, add the compare source:
+
+```bash
+cd infra/hyperdx
+docker exec -i hyperdx-mongo mongosh hyperdx --quiet < add-mirror-delay-source.js
+# or
+bash bootstrap-sources.sh
+```
+
+Then refresh HyperDX (hard refresh). Pick **Kafka Mirror Delay** in the source dropdown.
 
 ## Notes
 
