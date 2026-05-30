@@ -133,20 +133,39 @@ CREATE TABLE IF NOT EXISTS default.failover_message_dedup
 ENGINE = MergeTree
 ORDER BY (run_id, message_id, ts);
 
+CREATE TABLE IF NOT EXISTS default.failover_mirror_partition_lag
+(
+    ts DateTime64(3) DEFAULT now64(3),
+    run_id String,
+    phase LowCardinality(String),
+    partition Int32,
+    source_topic LowCardinality(String),
+    mirror_topic LowCardinality(String),
+    source_committed_offset Int64,
+    source_end_offset Int64,
+    mirror_end_offset Int64,
+    partition_lag Int64
+)
+ENGINE = MergeTree
+ORDER BY (run_id, phase, partition);
+
 CREATE TABLE IF NOT EXISTS default.failover_mirror_backlog_check
 (
     ts DateTime64(3) DEFAULT now64(3),
     run_id String,
     phase LowCardinality(String),
+    check_type LowCardinality(String),
     message_id String,
     mirror_status LowCardinality(String),
     primary_committed_lag_sum Int64,
     mirror_lag_messages Int64,
+    source_partition Int32,
+    source_offset Int64,
     mirror_partition Int32,
     mirror_offset Int64
 )
 ENGINE = MergeTree
-ORDER BY (run_id, phase, message_id);
+ORDER BY (run_id, phase, check_type, message_id);
 
 CREATE TABLE IF NOT EXISTS default.failover_test_summary
 (

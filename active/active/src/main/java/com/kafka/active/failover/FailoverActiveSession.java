@@ -134,10 +134,28 @@ final class FailoverActiveSession {
 				dupSamples,
 				bl == null ? 0L : bl.primaryCommittedLagSum(),
 				bl == null ? 0L : bl.mirrorLagMessages(),
-				bl == null ? 0 : bl.uncheckedUnreadCount(),
-				bl == null ? 0 : bl.missingOnMirrorCount(),
-				bl == null ? List.of() : bl.missingSampleIds(),
+				bl == null ? 0 : bl.pendingTestIdCount(),
+				bl == null
+						? 0
+						: bl.pendingMissingOnMirrorCount() + bl.sourceUnreadMissingOnMirrorCount(),
+				combineMissingSamples(bl),
 				startedAtMs,
 				finishedAtMs);
+	}
+
+	private static List<String> combineMissingSamples(MirrorBacklogCheckResult bl) {
+		if (bl == null) {
+			return List.of();
+		}
+		List<String> out = new ArrayList<>(bl.missingSampleIds());
+		for (String id : bl.sourceUnreadMissingSampleIds()) {
+			if (out.size() >= 30) {
+				break;
+			}
+			if (!out.contains(id)) {
+				out.add(id);
+			}
+		}
+		return out;
 	}
 }

@@ -131,24 +131,55 @@ public class ClickHouseFailoverSink {
 	public void insertMirrorBacklogCheck(
 			String runId,
 			String phase,
+			String checkType,
 			String messageId,
 			String mirrorStatus,
 			long primaryCommittedLag,
 			long mirrorLag,
+			int sourcePartition,
+			long sourceOffset,
 			int mirrorPartition,
 			long mirrorOffset) {
 		insertJsonEachRow(
 				"failover_mirror_backlog_check",
-				"{\"run_id\":\"%s\",\"phase\":\"%s\",\"message_id\":\"%s\",\"mirror_status\":\"%s\",\"primary_committed_lag_sum\":%d,\"mirror_lag_messages\":%d,\"mirror_partition\":%d,\"mirror_offset\":%d}"
+				"{\"run_id\":\"%s\",\"phase\":\"%s\",\"check_type\":\"%s\",\"message_id\":\"%s\",\"mirror_status\":\"%s\",\"primary_committed_lag_sum\":%d,\"mirror_lag_messages\":%d,\"source_partition\":%d,\"source_offset\":%d,\"mirror_partition\":%d,\"mirror_offset\":%d}"
 						.formatted(
 								esc(runId),
 								esc(phase),
+								esc(checkType),
 								esc(messageId),
 								esc(mirrorStatus),
 								primaryCommittedLag,
 								mirrorLag,
+								sourcePartition,
+								sourceOffset,
 								mirrorPartition,
 								mirrorOffset));
+	}
+
+	public void insertMirrorPartitionLag(
+			String runId,
+			String phase,
+			int partition,
+			String sourceTopic,
+			String mirrorTopic,
+			long sourceCommitted,
+			long sourceEnd,
+			long mirrorEnd,
+			long partitionLag) {
+		insertJsonEachRow(
+				"failover_mirror_partition_lag",
+				"{\"run_id\":\"%s\",\"phase\":\"%s\",\"partition\":%d,\"source_topic\":\"%s\",\"mirror_topic\":\"%s\",\"source_committed_offset\":%d,\"source_end_offset\":%d,\"mirror_end_offset\":%d,\"partition_lag\":%d}"
+						.formatted(
+								esc(runId),
+								esc(phase),
+								partition,
+								esc(sourceTopic),
+								esc(mirrorTopic),
+								sourceCommitted,
+								sourceEnd,
+								mirrorEnd,
+								partitionLag));
 	}
 
 	public void insertSummary(FailoverTestReport report) {

@@ -1,14 +1,14 @@
 package com.kafka.active.failover;
 
-import com.kafka.active.config.AppKafkaProperties;
-import com.kafka.active.config.AppMirrorMetricsProperties;
-import com.kafka.active.metrics.ConsumerGroupOffsets;
-import com.kafka.active.metrics.MirrorReplicationLagService;
-import com.kafka.active.metrics.TopicEndOffsets;
-import com.kafka.active.metrics.TopicRecentTailReader;
-import com.kafka.active.metrics.TopicTailRecord;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.kafka.active.config.AppKafkaProperties;
+import com.kafka.active.config.AppMirrorMetricsProperties;
+import com.kafka.active.metrics.MirrorReplicationLagService;
+import com.kafka.active.metrics.TopicRecentTailReader;
+import com.kafka.active.metrics.TopicTailRecord;
+import com.kafka.active.metrics.TopicUnreadScanner;
+import com.kafka.active.metrics.TopicUnreadSnapshot;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 public class FailoverMirrorBacklogVerifier {
 
 	private static final Logger log = LoggerFactory.getLogger(FailoverMirrorBacklogVerifier.class);
+	private static final int MAX_SOURCE_UNREAD_SAMPLE = 300;
 
 	private final AppKafkaProperties kafkaProperties;
 	private final AppMirrorMetricsProperties mirrorMetricsProperties;
@@ -47,7 +48,10 @@ public class FailoverMirrorBacklogVerifier {
 	}
 
 	/**
-	 * failover 직전: (1) primary committed~HWM lag (2) 테스트 run 에서 아직 consume 안 된 id 가 미러 토픽 tail 에 있는지.
+	 * failover 직전:
+	 * 1) 파티션별 committed~end lag
+	 * 2) 테스트 run pending id → 미러 tail 매칭
+	 * 3) 소스 unread 구간(committed 이후) tail 샘플 id → 미러 tail 매칭
 	 */
 	public MirrorBacklogCheckResult verifyBeforeFailover(FailoverActiveSession session, String phase)
 			throws ExecutionException, InterruptedException {
@@ -60,70 +64,167 @@ public class FailoverMirrorBacklogVerifier {
 		String mirrorBoot = kafkaProperties.bootstrapFor(mirrorKey);
 		String groupId = kafkaProperties.getConsumer().getGroupId();
 
-		long committedLagSum = committedLagSum(primaryBoot, sourceTopic, groupId);
+		TopicUnreadSnapshot unread =
+				TopicUnreadScanner.scan(primaryBoot, sourceTopic, groupId, MAX_SOURCE_UNREAD_SAMPLE);
 		var lagSnap = lagService.compute();
 		long mirrorLag = lagSnap.lagMessages();
 
-		Set<String> pendingIds = session.pendingMessageIds();
-		Map<String, TopicTailRecord> mirrorById = indexByMessageId(
-				TopicRecentTailReader.readTail(mirrorBoot, mirrorTopic, Math.max(200, pendingIds.size() * 4)));
+		Map<Integer, Long> mirrorEnd = lagSnap.mirrorHighWatermark() > 0
+				? perPartitionEndFromMirror(mirrorBoot, mirrorTopic)
+				: Map.of();
 
-		int mirrored = 0;
-		List<String> missing = new ArrayList<>();
-		for (String id : pendingIds) {
-			boolean onMirror = mirrorById.containsKey(id);
-			if (onMirror) {
-				mirrored++;
-			} else {
-				missing.add(id);
-			}
-			TopicTailRecord mir = mirrorById.get(id);
+		for (var e : unread.committedPerPartition().entrySet()) {
+			int p = e.getKey();
+			long comm = e.getValue();
+			long srcEnd = unread.endPerPartition().getOrDefault(p, 0L);
+			long mirEnd = mirrorEnd.getOrDefault(p, 0L);
+			long partLag = Math.max(0L, srcEnd - mirEnd);
+			clickHouse.insertMirrorPartitionLag(
+					runId,
+					phase,
+					p,
+					sourceTopic,
+					mirrorTopic,
+					comm,
+					srcEnd,
+					mirEnd,
+					partLag);
+		}
+
+		int mirrorTailLimit =
+				Math.max(300, unread.unreadRecords().size() * 2 + session.pendingMessageIds().size() * 4);
+		Map<String, TopicTailRecord> mirrorById =
+				indexByMessageId(TopicRecentTailReader.readTail(mirrorBoot, mirrorTopic, mirrorTailLimit));
+
+		PendingCheck pending = checkPending(session.pendingMessageIds(), mirrorById);
+		for (var row : pending.rows()) {
 			clickHouse.insertMirrorBacklogCheck(
 					runId,
 					phase,
-					id,
-					onMirror ? "mirrored" : "missing_on_mirror",
-					committedLagSum,
+					"pending_test_id",
+					row.id(),
+					row.status(),
+					unread.committedLagSum(),
 					mirrorLag,
-					mir == null ? -1 : mir.partition(),
-					mir == null ? -1L : mir.offset());
+					row.sourcePartition(),
+					row.sourceOffset(),
+					row.mirrorPartition(),
+					row.mirrorOffset());
 		}
 
-		List<String> missingSample = missing.size() > 20 ? missing.subList(0, 20) : missing;
+		SourceUnreadCheck sourceUnread =
+				checkSourceUnread(unread.unreadRecords(), mirrorById, unread.committedPerPartition());
+		for (var row : sourceUnread.rows()) {
+			clickHouse.insertMirrorBacklogCheck(
+					runId,
+					phase,
+					"source_unread",
+					row.id(),
+					row.status(),
+					unread.committedLagSum(),
+					mirrorLag,
+					row.sourcePartition(),
+					row.sourceOffset(),
+					row.mirrorPartition(),
+					row.mirrorOffset());
+		}
+
+		List<String> allMissing = new ArrayList<>(pending.missingIds());
+		for (String id : sourceUnread.missingIds()) {
+			if (allMissing.size() < 30 && !allMissing.contains(id)) {
+				allMissing.add(id);
+			}
+		}
+
 		log.info(
-				"mirror backlog check run={} phase={} pending={} mirrored={} missing={} committedLagSum={} mirrorLag={}",
+				"mirror backlog run={} phase={} committedLag={} mirrorLag={} pending={}/{} miss={} unreadSample={}/{} miss={}",
 				runId,
 				phase,
-				pendingIds.size(),
-				mirrored,
-				missing.size(),
-				committedLagSum,
-				mirrorLag);
+				unread.committedLagSum(),
+				mirrorLag,
+				pending.mirrored(),
+				pending.total(),
+				pending.missing(),
+				sourceUnread.mirrored(),
+				sourceUnread.total(),
+				sourceUnread.missing());
 
 		return new MirrorBacklogCheckResult(
 				runId,
 				phase,
-				committedLagSum,
+				unread.committedLagSum(),
 				mirrorLag,
-				pendingIds.size(),
-				mirrored,
-				missing.size(),
-				missingSample);
+				pending.total(),
+				pending.mirrored(),
+				pending.missing(),
+				sourceUnread.total(),
+				sourceUnread.mirrored(),
+				sourceUnread.missing(),
+				allMissing,
+				sourceUnread.missingIds());
 	}
 
-	private long committedLagSum(String bootstrap, String topic, String groupId)
+	private Map<Integer, Long> perPartitionEndFromMirror(String bootstrap, String mirrorTopic)
 			throws ExecutionException, InterruptedException {
-		Map<Integer, Long> end = TopicEndOffsets.latestPerPartition(bootstrap, topic);
-		Map<Integer, Long> committed =
-				ConsumerGroupOffsets.committedPerPartition(bootstrap, groupId, topic);
-		long lag = 0;
-		for (var e : end.entrySet()) {
-			int p = e.getKey();
-			long endOff = e.getValue();
-			long comm = committed.getOrDefault(p, 0L);
-			lag += Math.max(0L, endOff - comm);
+		return com.kafka.active.metrics.TopicEndOffsets.latestPerPartition(bootstrap, mirrorTopic);
+	}
+
+	private PendingCheck checkPending(Set<String> pendingIds, Map<String, TopicTailRecord> mirrorById) {
+		int mirrored = 0;
+		List<String> missing = new ArrayList<>();
+		List<CheckRow> rows = new ArrayList<>();
+		for (String id : pendingIds) {
+			TopicTailRecord mir = mirrorById.get(id);
+			boolean ok = mir != null;
+			if (ok) {
+				mirrored++;
+			} else {
+				missing.add(id);
+			}
+			rows.add(
+					new CheckRow(
+							id,
+							ok ? "mirrored" : "missing_on_mirror",
+							-1,
+							-1L,
+							mir == null ? -1 : mir.partition(),
+							mir == null ? -1L : mir.offset()));
 		}
-		return lag;
+		return new PendingCheck(pendingIds.size(), mirrored, missing.size(), missing, rows);
+	}
+
+	private SourceUnreadCheck checkSourceUnread(
+			List<TopicTailRecord> unreadRecords,
+			Map<String, TopicTailRecord> mirrorById,
+			Map<Integer, Long> committedPerPartition) {
+		int mirrored = 0;
+		int total = 0;
+		List<String> missing = new ArrayList<>();
+		List<CheckRow> rows = new ArrayList<>();
+		Set<String> seen = new HashSet<>();
+		for (TopicTailRecord src : unreadRecords) {
+			String id = parseId(src.value()).orElse(null);
+			if (id == null || !seen.add(id)) {
+				continue;
+			}
+			total++;
+			TopicTailRecord mir = mirrorById.get(id);
+			boolean ok = mir != null;
+			if (ok) {
+				mirrored++;
+			} else if (missing.size() < 30) {
+				missing.add(id);
+			}
+			rows.add(
+					new CheckRow(
+							id,
+							ok ? "mirrored" : "missing_on_mirror",
+							src.partition(),
+							src.offset(),
+							mir == null ? -1 : mir.partition(),
+							mir == null ? -1L : mir.offset()));
+		}
+		return new SourceUnreadCheck(total, mirrored, missing.size(), missing, rows);
 	}
 
 	private Map<String, TopicTailRecord> indexByMessageId(List<TopicTailRecord> rows) {
@@ -147,4 +248,18 @@ public class FailoverMirrorBacklogVerifier {
 		}
 		return java.util.Optional.empty();
 	}
+
+	private record CheckRow(
+			String id,
+			String status,
+			int sourcePartition,
+			long sourceOffset,
+			int mirrorPartition,
+			long mirrorOffset) {}
+
+	private record PendingCheck(
+			int total, int mirrored, int missing, List<String> missingIds, List<CheckRow> rows) {}
+
+	private record SourceUnreadCheck(
+			int total, int mirrored, int missing, List<String> missingIds, List<CheckRow> rows) {}
 }

@@ -93,9 +93,13 @@ public class FailoverTestService {
 					"mirror_backlog_check",
 					"PRIMARY",
 					"pending="
-							+ check.uncheckedUnreadCount()
-							+ " missingOnMirror="
-							+ check.missingOnMirrorCount());
+							+ check.pendingTestIdCount()
+							+ " pendingMiss="
+							+ check.pendingMissingOnMirrorCount()
+							+ " unreadSample="
+							+ check.sourceUnreadSampleCount()
+							+ " unreadMiss="
+							+ check.sourceUnreadMissingOnMirrorCount());
 		} catch (Exception e) {
 			throw new IllegalStateException("mirror backlog check failed: " + e.getMessage(), e);
 		}

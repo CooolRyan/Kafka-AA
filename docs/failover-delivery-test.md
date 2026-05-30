@@ -74,8 +74,16 @@ SELECT message_id FROM default.failover_message_produced WHERE run_id = '<run_id
 
 `POST /api/failover/test/mirror-backlog-check` 또는 **Failover Standby 직전 자동** 실행:
 
-- Primary **committed~HWM lag** 합 (`primary_committed_lag_sum`)
-- 테스트 run 에서 **아직 consume 안 한 id** 가 미러 tail 에 있는지 → `failover_mirror_backlog_check`
+| check_type | 의미 |
+|------------|------|
+| `pending_test_id` | 이번 run 에 produce 했는데 아직 consume 안 한 id → 미러 tail 에 있는지 |
+| `source_unread` | Primary **committed 이후** tail 샘플 id → 미러 tail 에 있는지 |
+
+추가 테이블:
+
+- `failover_mirror_partition_lag` — 파티션별 committed / source end / mirror end / lag
+
+상세 offset 이어받기: [failover-mm2-offset-sync.md](failover-mm2-offset-sync.md)
 
 ## HAProxy = L4 (TCP)
 

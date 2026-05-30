@@ -7,7 +7,11 @@ public record MirrorBacklogCheckResult(
 		String phase,
 		long primaryCommittedLagSum,
 		long mirrorLagMessages,
-		int uncheckedUnreadCount,
-		int mirroredCount,
-		int missingOnMirrorCount,
-		List<String> missingSampleIds) {}
+		int pendingTestIdCount,
+		int pendingMirroredCount,
+		int pendingMissingOnMirrorCount,
+		int sourceUnreadSampleCount,
+		int sourceUnreadMirroredCount,
+		int sourceUnreadMissingOnMirrorCount,
+		List<String> missingSampleIds,
+		List<String> sourceUnreadMissingSampleIds) {}
