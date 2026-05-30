@@ -83,6 +83,23 @@ services:
             "traceIdExpression":"''",
             "spanIdExpression":"''",
             "connection":"Kafka Mirror ClickHouse"
+          },
+          {
+            "from":{"databaseName":"default","tableName":"failover_test_summary"},
+            "kind":"log",
+            "timestampValueExpression":"ts",
+            "name":"Kafka Failover Summary",
+            "displayedTimestampValueExpression":"ts",
+            "implicitColumnExpression":"concat(run_id, ' missing=', toString(missing_count), ' dup=', toString(duplicate_consume_count))",
+            "serviceNameExpression":"status",
+            "bodyExpression":"notes",
+            "eventAttributesExpression":"map('run_id', run_id, 'produced_count', toString(produced_count), 'consumed_unique', toString(consumed_unique), 'missing_count', toString(missing_count), 'duplicate_consume_count', toString(duplicate_consume_count))",
+            "resourceAttributesExpression":"map('source', 'failover-test')",
+            "defaultTableSelectExpression":"ts,run_id,status,produced_count,consumed_unique,missing_count,duplicate_consume_count,active_consumer_role",
+            "severityTextExpression":"if(missing_count = 0 AND duplicate_consume_count = 0, 'ok', 'issue')",
+            "traceIdExpression":"''",
+            "spanIdExpression":"''",
+            "connection":"Kafka Mirror ClickHouse"
           }
         ]
 

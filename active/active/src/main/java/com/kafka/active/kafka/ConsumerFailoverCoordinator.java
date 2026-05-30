@@ -5,11 +5,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.listener.MessageListenerContainer;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 @Service
 @Profile("!test")
+@ConditionalOnProperty(
+		prefix = "app.kafka",
+		name = "consumer-mode",
+		havingValue = "dual-listener",
+		matchIfMissing = true)
 public class ConsumerFailoverCoordinator {
 
 	private static final Logger log = LoggerFactory.getLogger(ConsumerFailoverCoordinator.class);

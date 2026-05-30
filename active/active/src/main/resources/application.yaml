@@ -33,7 +33,9 @@ app:
     consumer:
       primary: A
       topic: aa-demo-events
+      mirror-topic: A.aa-demo-events
       group-id: aa-demo-app
+      idempotency-enabled: true
     failover-watchdog-enabled: true
     failover-check-interval-ms: 15000
 
@@ -48,6 +50,8 @@ app:
     # ClickHouse mirror_message_tail 적재 시 소스/미러 각각 최대 N건
     tail-sample-limit: 24
     tail-to-clickhouse: true
+    compare-fallback-clickhouse: true
+    compare-clickhouse-row-limit: 30
 
   clickhouse:
     enabled: true

@@ -8,6 +8,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -24,6 +25,11 @@ import org.springframework.kafka.listener.ContainerProperties;
 @Configuration
 @EnableKafka
 @Profile("!test")
+@ConditionalOnProperty(
+		prefix = "app.kafka",
+		name = "consumer-mode",
+		havingValue = "dual-listener",
+		matchIfMissing = true)
 public class DualClusterKafkaConfiguration {
 
 	private static Map<String, Object> producerProps(String bootstrap) {

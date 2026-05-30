@@ -66,8 +66,31 @@ public class DemoKafkaController {
 						"clusterBReachable", probe.canReachCluster("B")));
 	}
 
+	@GetMapping("/failover/mode")
+	public ResponseEntity<Map<String, Object>> failoverMode() {
+		return ResponseEntity.ok(
+				Map.of(
+						"consumerMode",
+						kafkaProperties.isProxyConsumerMode() ? "proxy" : "dual-listener",
+						"proxyBootstrap",
+						kafkaProperties.isProxyConsumerMode()
+								? kafkaProperties.getProxyBootstrapServers()
+								: "",
+						"hint",
+						kafkaProperties.isProxyConsumerMode()
+								? "Use HAProxy active/backup; stop cluster A to fail over"
+								: "Use POST /api/failover/standby or watchdog"));
+	}
+
 	@PostMapping("/failover/{target}")
 	public ResponseEntity<Map<String, Object>> failover(@PathVariable String target) {
+		if (kafkaProperties.isProxyConsumerMode()) {
+			return ResponseEntity.badRequest()
+					.body(
+							Map.of(
+									"error",
+									"consumer-mode=proxy: use HAProxy failover (stop cluster A), not app listener switch"));
+		}
 		return switch (target.toLowerCase()) {
 			case "standby" -> {
 				failoverCoordinator.failoverToStandby();

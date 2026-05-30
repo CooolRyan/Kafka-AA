@@ -1,0 +1,9 @@
+# HAProxy 앞단 단일 bootstrap consumer (147: haproxy -f infra/haproxy/kafka-failover-active-backup.cfg)
+app:
+  kafka:
+    consumer-mode: proxy
+    proxy-bootstrap-servers: 127.0.0.1:19092
+    failover-watchdog-enabled: false
+    consumer:
+      mirror-topic: A.aa-demo-events
+      idempotency-enabled: true

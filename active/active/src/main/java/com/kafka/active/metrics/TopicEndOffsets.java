@@ -10,11 +10,11 @@ import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.TopicPartition;
 
-final class TopicEndOffsets {
+public final class TopicEndOffsets {
 
 	private TopicEndOffsets() {}
 
-	static int partitionCount(AdminClient admin, String topic)
+	public static int partitionCount(AdminClient admin, String topic)
 			throws ExecutionException, InterruptedException {
 		var futures = admin.describeTopics(List.of(topic)).topicNameValues();
 		var fd = futures.get(topic);
@@ -25,7 +25,7 @@ final class TopicEndOffsets {
 		return d.partitions().size();
 	}
 
-	static Map<Integer, Long> latestPerPartition(String bootstrap, String topic)
+	public static Map<Integer, Long> latestPerPartition(String bootstrap, String topic)
 			throws ExecutionException, InterruptedException {
 		Map<String, Object> cfg = Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap);
 		try (AdminClient admin = AdminClient.create(cfg)) {
