@@ -27,8 +27,8 @@ public class AppMirrorMetricsProperties {
 	/** Kafka tail 이 비었을 때 compare UI 를 ClickHouse 스냅샷으로 채움 */
 	private boolean compareFallbackClickhouse = true;
 
-	/** compare ClickHouse fallback 조회 구간(분) */
-	private int compareClickhouseLookbackMinutes = 30;
+	/** compare ClickHouse fallback: 소스/미러 각각 ts DESC 최신 N건 (UI limit 미지정 시) */
+	private int compareClickhouseRowLimit = 30;
 
 	public boolean isEnabled() {
 		return enabled;
@@ -109,11 +109,11 @@ public class AppMirrorMetricsProperties {
 		this.compareFallbackClickhouse = compareFallbackClickhouse;
 	}
 
-	public int getCompareClickhouseLookbackMinutes() {
-		return compareClickhouseLookbackMinutes;
+	public int getCompareClickhouseRowLimit() {
+		return compareClickhouseRowLimit;
 	}
 
-	public void setCompareClickhouseLookbackMinutes(int compareClickhouseLookbackMinutes) {
-		this.compareClickhouseLookbackMinutes = compareClickhouseLookbackMinutes;
+	public void setCompareClickhouseRowLimit(int compareClickhouseRowLimit) {
+		this.compareClickhouseRowLimit = compareClickhouseRowLimit;
 	}
 }

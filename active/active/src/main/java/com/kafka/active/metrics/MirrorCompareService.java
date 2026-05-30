@@ -64,14 +64,14 @@ public class MirrorCompareService {
 		if (src.isEmpty()
 				&& mir.isEmpty()
 				&& mirrorMetricsProperties.isCompareFallbackClickhouse()) {
+			int chLimit = Math.max(limit, mirrorMetricsProperties.getCompareClickhouseRowLimit());
 			var fromCh =
 					clickHouseMirrorTailSource.loadRecent(
-							limit,
+							chLimit,
 							srcTopic,
 							mirTopic,
 							lag.sourceCluster(),
-							lag.mirrorCluster(),
-							mirrorMetricsProperties.getCompareClickhouseLookbackMinutes());
+							lag.mirrorCluster());
 			src = fromCh.source();
 			mir = fromCh.mirror();
 		}

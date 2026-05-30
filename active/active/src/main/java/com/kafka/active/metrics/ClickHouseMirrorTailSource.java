@@ -31,87 +31,85 @@ public class ClickHouseMirrorTailSource {
 		this.objectMapper = objectMapper;
 	}
 
+	/**
+	 * INSERT 시각(ts) 기준 최신 N건을 소스/미러 각각 조회한다. (시간 구간 필터 없음)
+	 *
+	 * @param limitPerRole 소스·미러 각각 가져올 최대 row 수
+	 */
 	public TailFromClickHouse loadRecent(
-			int limit,
+			int limitPerRole,
 			String sourceTopic,
 			String mirrorTopic,
 			String sourceCluster,
-			String mirrorCluster,
-			int lookbackMinutes) {
+			String mirrorCluster) {
 		if (!props.isEnabled()) {
 			return new TailFromClickHouse(List.of(), List.of());
 		}
-		int lim = Math.max(10, Math.min(500, limit * 4));
-		int mins = Math.max(1, lookbackMinutes);
-		String db = props.getDatabase();
-		String sql =
-				"SELECT role, cluster, topic, partition, offset, kafka_ts_ms, value "
-						+ "FROM "
-						+ db
-						+ ".mirror_message_tail "
-						+ "WHERE ts > now() - INTERVAL "
-						+ mins
-						+ " MINUTE "
-						+ "AND ((role = 'source' AND topic = '"
-						+ escSql(sourceTopic)
-						+ "' AND cluster = '"
-						+ escSql(sourceCluster)
-						+ "') OR (role = 'mirror' AND topic = '"
-						+ escSql(mirrorTopic)
-						+ "' AND cluster = '"
-						+ escSql(mirrorCluster)
-						+ "')) "
-						+ "ORDER BY ts DESC "
-						+ "LIMIT "
-						+ lim
-						+ " FORMAT JSON";
-
+		int lim = Math.max(1, Math.min(500, limitPerRole));
 		try {
-			URI uri =
-					UriComponentsBuilder.fromUriString(props.getHttpUrl().replaceAll("/+$", ""))
-							.path("/")
-							.queryParam("database", db)
-							.queryParam("query", sql)
-							.queryParam("user", props.getUser())
-							.queryParam("password", props.getPassword() == null ? "" : props.getPassword())
-							.build()
-							.toUri();
-			String body = restClient.get().uri(uri).retrieve().body(String.class);
-			if (body == null || body.isBlank()) {
-				return new TailFromClickHouse(List.of(), List.of());
-			}
-			JsonNode root = objectMapper.readTree(body);
-			JsonNode data = root.get("data");
-			if (data == null || !data.isArray()) {
-				return new TailFromClickHouse(List.of(), List.of());
-			}
-			List<TopicTailRecord> src = new ArrayList<>();
-			List<TopicTailRecord> mir = new ArrayList<>();
-			for (JsonNode row : data) {
-				String role = text(row, "role");
-				int partition = row.get("partition").asInt();
-				long offset = row.get("offset").asLong();
-				long kafkaTs = row.get("kafka_ts_ms").asLong();
-				String value = text(row, "value");
-				TopicTailRecord rec = new TopicTailRecord(partition, offset, kafkaTs, null, value);
-				if ("source".equalsIgnoreCase(role)) {
-					src.add(rec);
-				} else if ("mirror".equalsIgnoreCase(role)) {
-					mir.add(rec);
-				}
-			}
+			List<TopicTailRecord> src =
+					queryLatestByRole("source", sourceTopic, sourceCluster, lim);
+			List<TopicTailRecord> mir =
+					queryLatestByRole("mirror", mirrorTopic, mirrorCluster, lim);
 			if (!src.isEmpty() || !mir.isEmpty()) {
 				log.info(
-						"compare UI: loaded from ClickHouse src={} mir={} lookbackMin={}",
+						"compare UI: loaded from ClickHouse src={} mir={} limitPerRole={}",
 						src.size(),
 						mir.size(),
-						mins);
+						lim);
 			}
 			return new TailFromClickHouse(src, mir);
 		} catch (Exception e) {
 			log.warn("clickhouse tail load failed: {}", e.toString());
 			return new TailFromClickHouse(List.of(), List.of());
 		}
+	}
+
+	private List<TopicTailRecord> queryLatestByRole(
+			String role, String topic, String cluster, int limit) throws Exception {
+		String db = props.getDatabase();
+		String sql =
+				"SELECT role, cluster, topic, partition, offset, kafka_ts_ms, value "
+						+ "FROM "
+						+ db
+						+ ".mirror_message_tail "
+						+ "WHERE role = '"
+						+ escSql(role)
+						+ "' AND topic = '"
+						+ escSql(topic)
+						+ "' AND cluster = '"
+						+ escSql(cluster)
+						+ "' ORDER BY ts DESC LIMIT "
+						+ limit
+						+ " FORMAT JSON";
+
+		URI uri =
+				UriComponentsBuilder.fromUriString(props.getHttpUrl().replaceAll("/+$", ""))
+						.path("/")
+						.queryParam("database", db)
+						.queryParam("query", sql)
+						.queryParam("user", props.getUser())
+						.queryParam("password", props.getPassword() == null ? "" : props.getPassword())
+						.build()
+						.toUri();
+		String body = restClient.get().uri(uri).retrieve().body(String.class);
+		if (body == null || body.isBlank()) {
+			return List.of();
+		}
+		JsonNode root = objectMapper.readTree(body);
+		JsonNode data = root.get("data");
+		if (data == null || !data.isArray()) {
+			return List.of();
+		}
+		List<TopicTailRecord> out = new ArrayList<>();
+		for (JsonNode row : data) {
+			int partition = row.get("partition").asInt();
+			long offset = row.get("offset").asLong();
+			long kafkaTs = row.get("kafka_ts_ms").asLong();
+			String value = text(row, "value");
+			out.add(new TopicTailRecord(partition, offset, kafkaTs, null, value));
+		}
+		return out;
 	}
 
 	private static String text(JsonNode row, String field) {

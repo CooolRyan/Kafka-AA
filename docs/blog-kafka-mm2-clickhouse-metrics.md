@@ -251,13 +251,13 @@ ssh -4 -i local-ssh.pem -L 3000:127.0.0.1:3000 -L 8000:127.0.0.1:8000 ubuntu@192
 
 실시간 비교 페이지는 기본적으로 **Kafka tail**을 읽지만, 브로커 retention 등으로 tail이 비면 빈 화면이 된다.
 
-그래서 `MirrorCompareService`는 Kafka tail이 **둘 다 비었을 때** `ClickHouseMirrorTailSource`로 `mirror_message_tail` 최근 30분(기본)을 읽어 UI를 채운다.
+그래서 `MirrorCompareService`는 Kafka tail이 **둘 다 비었을 때** `ClickHouseMirrorTailSource`로 `mirror_message_tail`을 **INSERT 시각 `ts` DESC** 기준으로 소스/미러 **각각 최신 N건**(기본 30, UI `limit`과 `compare-clickhouse-row-limit` 중 큰 값)을 읽어 UI를 채운다. (`now()-30분` 같은 시간 구간 필터는 사용하지 않음)
 
 ```yaml
 app:
   mirror-metrics:
     compare-fallback-clickhouse: true
-    compare-clickhouse-lookback-minutes: 30
+    compare-clickhouse-row-limit: 30
 ```
 
 - **영속 이력·블로그 검증:** ClickHouse / HyperDX
